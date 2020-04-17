@@ -10,6 +10,7 @@ from PIL import Image
 from DetectionTF import Detection
 import utils
 from shapely.geometry import Point, Polygon
+import configparser
 
 import cv2
 import numpy as np
@@ -35,6 +36,7 @@ parser.add_argument(
     help="Minimum confidence threshold for displaying detected objects",
     default=0.5,
 )
+parser.add_argument('--detection', help="Type of detection. ['line', 'polygon']", required=True)
 parser.add_argument("--output", help="Write video to file", default="")
 
 args = parser.parse_args()
@@ -42,7 +44,12 @@ args = parser.parse_args()
 MODEL_NAME = args.modeldir
 SRC = args.src
 THRESHOLD = float(args.threshold)
+DETECTION_TYPE = args.detection
 OUTPUT = args.output
+
+config = configparser.ConfigParser()
+config.read('config.ini')
+
 
 # Get path to current working directory
 CWD_PATH = os.getcwd()
@@ -57,20 +64,18 @@ SRC_HEIGHT = int(stream.get(4))
 
 frame_num = 0
 
-p1 = (0, 0)
-p2 = (1000, 0)
-p3 = (1000, 1080)
-p4 = (0, 1080)
+if DETECTION_TYPE == 'line':
+    p1, p2 = list(map(lambda item: tuple(map(lambda num: int(num), item[1].split(','))), config.items('Line')))
+    cenTracker = DirectionCentroidTracker(p1, p2, maxDisappeared=40)
+if DETECTION_TYPE == 'polygon':
+    coords = list(map(lambda item: tuple(map(lambda num: int(num), item[1].split(','))), config.items('Polygon')))
 
-coords = [p1, p2, p3, p4]
+    # Create a Polygon
+    poly = Polygon(coords)
+    inPolygon = defaultdict(lambda: False)
+    intruders = []
 
-# Create a Polygon
-poly = Polygon(coords)
-inPolygon = defaultdict(lambda: False)
-intruders = []
-
-# cenTracker = DirectionCentroidTracker(p1, p2, maxDisappeared=20)
-cenTracker = CentroidTracker(maxDisappeared=40)
+    cenTracker = CentroidTracker(maxDisappeared=40)
 
 detector = Detection(MODEL_NAME)
 
@@ -104,47 +109,50 @@ while True:
 
     for (objectID, centroid) in objects.items():
 
-        # isThatSide = cenTracker.isBottomOrRightSide(centroid[0], centroid[1])
-        # if isThatSide and objectID in cenTracker.topLeftSide:
-        #     cenTracker.topLeftSide.remove(objectID)
-        #     cenTracker.bottomRightSide.append(objectID)
-        #     # moved from top left to btm right, call API!
-        #     bottomRightCount += 1
-        # elif not isThatSide and objectID in cenTracker.bottomRightSide:
-        #     cenTracker.bottomRightSide.remove(objectID)
-        #     cenTracker.topLeftSide.append(objectID)
-        #     # moved top btm right to top left, call API!!
-        #     topLeftCount += 1
-        # totalCount = bottomRightCount - topLeftCount
+        if DETECTION_TYPE == 'line':
+            # isThatSide = cenTracker.isBottomOrRightSide(centroid[0], centroid[1])
+            # if isThatSide and objectID in cenTracker.topLeftSide:
+            #     cenTracker.topLeftSide.remove(objectID)
+            #     cenTracker.bottomRightSide.append(objectID)
+            #     # moved from top left to btm right, call API!
+            #     bottomRightCount += 1
+            # elif not isThatSide and objectID in cenTracker.bottomRightSide:
+            #     cenTracker.bottomRightSide.remove(objectID)
+            #     cenTracker.topLeftSide.append(objectID)
+            #     # moved top btm right to top left, call API!!
+            #     topLeftCount += 1
+            # totalCount = bottomRightCount - topLeftCount
+            pass
 
-        # utils.draw_centroid(frame, centroid, objectID)
+        if DETECTION_TYPE == 'polygon':
+            if Point(centroid).within(poly):
+                if not inPolygon[objectID]:
+                    inPolygon[objectID] = True
+                    # print(f'{objectID} has intruded into the polygon')
+                    intruders.append(objectID)
+                # inPolygon[objectID] += 1
+                # print(inPolygon[objectID])
+                # if inPolygon[objectID] >= 50:
+                #     print(f'{objectID} in polygon for {inPolygon[objectID]} frames')
 
         utils.draw_centroid(frame, centroid, objectID)
-        if Point(centroid).within(poly):
-            if not inPolygon[objectID]:
-                inPolygon[objectID] = True
-                # print(f'{objectID} has intruded into the polygon')
-                intruders.append(objectID)
-            # inPolygon[objectID] += 1
-            # print(inPolygon[objectID])
-            # if inPolygon[objectID] >= 50:
-            #     print(f'{objectID} in polygon for {inPolygon[objectID]} frames')
-        pass
 
     # Draw Line / Polygon
-    # cv2.line(frame, p1, p2, (0, 0, 255), 2)
-    for i in range(len(coords)):
-        c1 = coords[i - 1]
-        c2 = coords[i]
-        cv2.line(frame, c1, c2, (0, 0, 255), 2)
-
-    info = [("Intruders", intruders)]
-    if type(cenTracker) == DirectionCentroidTracker:
+    if DETECTION_TYPE == 'line':
+        cv2.line(frame, p1, p2, (0, 0, 255), 2)
         info = [
             ("Total", cenTracker.totalCount),
             ("Entered", cenTracker.bottomRightCount),
             ("Exited", cenTracker.topLeftCount),
         ]
+
+    if DETECTION_TYPE == 'polygon'
+        for i in range(len(coords)):
+            c1 = coords[i - 1]
+            c2 = coords[i]
+            cv2.line(frame, c1, c2, (0, 0, 255), 2)
+        info = [("Intruders", intruders)]
+        
 
     for (i, (k, v)) in enumerate(info):
         text = f"{k}, {v}"
